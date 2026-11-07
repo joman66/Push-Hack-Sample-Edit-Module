@@ -53,9 +53,17 @@ func (e *Engine) Play(ch [][]float32, srcRate int, o Opts) int {
 	if len(ch) == 0 || len(ch[0]) == 0 {
 		return -1
 	}
+	// Copy the channel list. An edit can swap a channel slice of the document
+	// (crop, cut, paste) while this voice still plays; the voice keeps the old
+	// slices, and every channel must be at least as long as the voice reads.
+	ch = append([][]float32(nil), ch...)
+	n := len(ch[0])
+	for _, c := range ch {
+		n = min(n, len(c))
+	}
 	end := o.End
-	if end <= 0 || end > len(ch[0]) {
-		end = len(ch[0])
+	if end <= 0 || end > n {
+		end = n
 	}
 	if o.Start < 0 || o.Start >= end {
 		return -1
@@ -147,6 +155,10 @@ func (e *Engine) Render(out []float32) {
 				}
 			}
 			p := int(v.pos)
+			if p < 0 || p+1 >= v.end { // never read past the audio
+				v.done = true
+				break
+			}
 			f := float32(v.pos - float64(p))
 			l := lerp(v.ch[0][p], v.ch[0][p+1], f)
 			r := l
