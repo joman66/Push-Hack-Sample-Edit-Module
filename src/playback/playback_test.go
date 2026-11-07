@@ -83,3 +83,32 @@ func TestBadArgs(t *testing.T) {
 		t.Fatal("position")
 	}
 }
+
+// A document edit can swap or shorten a channel slice while a voice plays.
+// The voice must not read past the audio it was given (it crashed the app).
+func TestVoiceSurvivesShorterChannel(t *testing.T) {
+	e := New(48000)
+	ch := [][]float32{make([]float32, 1000), make([]float32, 600)} // right is shorter
+	h := e.Play(ch, 48000, Opts{})
+	if h < 0 {
+		t.Fatal("no voice")
+	}
+	ch[0] = ch[0][:100] // the edit swaps the document's slice
+	out := make([]float32, 2*256)
+	for i := 0; i < 10; i++ {
+		e.Render(out) // must not panic
+	}
+	if e.Playing() {
+		t.Fatal("the voice should have ended")
+	}
+}
+
+func TestStepFastNeverReadsPastEnd(t *testing.T) {
+	e := New(48000)
+	ch := [][]float32{make([]float32, 500)}
+	e.Play(ch, 48000, Opts{Semitones: 24, Loop: true})
+	out := make([]float32, 2*256)
+	for i := 0; i < 50; i++ {
+		e.Render(out)
+	}
+}

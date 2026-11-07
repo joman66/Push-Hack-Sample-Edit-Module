@@ -388,7 +388,7 @@ func audioLoop(ctx context.Context, cl *audiobus.Client, eng *playback.Engine, m
 			}
 			continue
 		}
-		eng.Render(buf)
+		renderSafe(eng, buf)
 		mon.Render(buf, rate) // adds the live input when the monitor is on
 		cl.Write(buf)
 	}
@@ -536,3 +536,19 @@ func serve(ctx context.Context, cfg hackcfg.Config, a *app.App) {
 
 var _ = push3.CCShift
 var _ = audio.MinDB
+
+// renderSafe renders one block. A bug in the mixer must not end the whole
+// app (it did: a panic here stopped the service). The voices are dropped and
+// the block is silent.
+func renderSafe(eng *playback.Engine, buf []float32) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("render: %v (voices dropped)", r)
+			eng.StopAll()
+			for i := range buf {
+				buf[i] = 0
+			}
+		}
+	}()
+	eng.Render(buf)
+}
