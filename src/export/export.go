@@ -2,21 +2,39 @@
 // exported WAV: Simpler (one sample), Sampler (many key and velocity zones)
 // and Drum Rack (one pad per slice).
 //
-// The XML follows the Live 12 preset layout as far as it is known, and
-// carries the nodes that matter (sample ref, key and velocity ranges, root
-// key, loop, choke group, pad note). It has NOT been loaded in a real Live
-// yet. Check it on a Push first, as CLAUDE.md asks of any new file format.
+// The XML comes from templates (tmpl/*.xml) that were cut from presets which
+// a real Live 12.4.6 saved on a Push 3 (see scripts/make_preset_templates.py).
+// Live refuses a preset with missing nodes, so only the parts that change are
+// filled in: the sample parts, the transpose, the playback mode and, in a Drum
+// Rack, the branches (name, pad note, choke group).
 package export
 
 import (
 	"bytes"
 	"compress/gzip"
+	_ "embed"
 	"fmt"
 	"html"
 	"os"
 	"path/filepath"
 	"strings"
 )
+
+//go:embed tmpl/simpler.xml
+var tmplSimpler string
+
+//go:embed tmpl/sampler.xml
+var tmplSampler string
+
+//go:embed tmpl/drumrack.xml
+var tmplDrumRack string
+
+//go:embed tmpl/drumbranch.xml
+var tmplDrumBranch string
+
+// UserLibrary is Live's User Library on a Push. A sample inside it is stored
+// with a relative path, so the preset still finds it if the library moves.
+const UserLibrary = "/data/Music/Ableton/User Library/"
 
 // Loop is a sustain loop in frames of the sample.
 type Loop struct{ Start, End int }
@@ -27,6 +45,7 @@ type Zone struct {
 	Name         string
 	Frames, Rate int
 	FileSize     int64
+	ModTime      int64 // file modification time, unix seconds
 	Root         int
 	KeyLo, KeyHi int
 	VelLo, VelHi int
@@ -51,133 +70,191 @@ type Pad struct {
 	Choke int // 0 = none, 1-16
 }
 
-const header = `<?xml version="1.0" encoding="UTF-8"?>
-<Ableton MajorVersion="5" MinorVersion="12.0_12402" SchemaChangeCount="5" Creator="Ableton Live 12.4.6" Revision="">
-`
-
 func esc(s string) string { return html.EscapeString(s) }
 
-func rng(b *strings.Builder, tag string, lo, hi int) {
-	fmt.Fprintf(b, "<%s><Min Value=\"%d\" /><Max Value=\"%d\" /><CrossfadeMin Value=\"%d\" /><CrossfadeMax Value=\"%d\" /></%s>\n", tag, lo, hi, lo, hi, tag)
-}
-
-func loopXML(b *strings.Builder, tag string, z Zone) {
-	_, e := z.window()
-	if z.Loop != nil {
-		fmt.Fprintf(b, "<%s><Start Value=\"%d\" /><End Value=\"%d\" /><Mode Value=\"1\" /><Crossfade Value=\"%d\" /><Detune Value=\"0\" /></%s>\n",
-			tag, z.Loop.Start, z.Loop.End, z.Crossfade, tag)
-		return
+// fileRef is the <FileRef> body for a WAV. Inside the User Library Live uses
+// path type 6 and a relative path; elsewhere only the absolute path.
+func fileRef(z Zone, indent string) string {
+	relType, rel := 0, ""
+	if r, ok := strings.CutPrefix(z.Path, UserLibrary); ok {
+		relType, rel = 6, r
 	}
-	fmt.Fprintf(b, "<%s><Start Value=\"0\" /><End Value=\"%d\" /><Mode Value=\"0\" /><Crossfade Value=\"0\" /><Detune Value=\"0\" /></%s>\n", tag, e, tag)
-}
-
-func samplePart(b *strings.Builder, id int, z Zone) {
-	s, e := z.window()
-	fmt.Fprintf(b, "<MultiSamplePart Id=\"%d\">\n", id)
-	b.WriteString("<LomId Value=\"0\" /><Selection Value=\"true\" /><IsActive Value=\"true\" /><Solo Value=\"false\" />\n")
-	fmt.Fprintf(b, "<Name Value=\"%s\" />\n", esc(z.Name))
-	rng(b, "KeyRange", z.KeyLo, z.KeyHi)
-	rng(b, "VelocityRange", max(z.VelLo, 1), min(max(z.VelHi, 1), 127))
-	rng(b, "SelectorRange", 0, 127)
-	fmt.Fprintf(b, "<RootKey Value=\"%d\" /><Detune Value=\"0\" /><TuneScale Value=\"100\" /><Panorama Value=\"0\" /><Volume Value=\"1\" /><Link Value=\"false\" />\n", z.Root)
-	fmt.Fprintf(b, "<SampleStart Value=\"%d\" /><SampleEnd Value=\"%d\" />\n", s, e)
-	loopXML(b, "SustainLoop", z)
-	b.WriteString("<ReleaseLoop><Start Value=\"0\" /><End Value=\"0\" /><Mode Value=\"3\" /><Crossfade Value=\"0\" /><Detune Value=\"0\" /></ReleaseLoop>\n")
-	b.WriteString("<SampleRef><FileRef>\n")
-	fmt.Fprintf(b, "<HasRelativePath Value=\"false\" /><RelativePathType Value=\"0\" /><RelativePath />\n")
-	fmt.Fprintf(b, "<Name Value=\"%s\" /><Type Value=\"1\" /><Path Value=\"%s\" />\n", esc(filepath.Base(z.Path)), esc(z.Path))
-	fmt.Fprintf(b, "<LivePackName Value=\"\" /><LivePackId Value=\"\" /><OriginalFileSize Value=\"%d\" /><OriginalCrc Value=\"0\" />\n", z.FileSize)
-	b.WriteString("</FileRef>\n")
-	fmt.Fprintf(b, "<LastModDate Value=\"0\" /><SourceContext /><SampleUsageHint Value=\"0\" /><DefaultDuration Value=\"%d\" /><DefaultSampleRate Value=\"%d\" />\n", z.Frames, z.Rate)
-	b.WriteString("</SampleRef>\n</MultiSamplePart>\n")
-}
-
-func pitch(b *strings.Builder, semis float64) {
-	whole := int(semis)
-	fine := int((semis - float64(whole)) * 100)
-	fmt.Fprintf(b, "<Pitch><TransposeKey><Manual Value=\"%d\" /></TransposeKey><TransposeFine><Manual Value=\"%d\" /></TransposeFine></Pitch>\n", whole, fine)
-}
-
-func simplerDevice(b *strings.Builder, id int, zones []Zone, multi bool, classic bool) {
-	tag := "OriginalSimpler"
-	if multi {
-		tag = "MultiSampler"
-	}
-	fmt.Fprintf(b, "<%s Id=\"%d\">\n", tag, id)
-	b.WriteString("<LomId Value=\"0\" /><IsExpanded Value=\"true\" /><On><LomId Value=\"0\" /><Manual Value=\"true\" /></On>\n")
-	b.WriteString("<Player><MultiSampleMap><SampleParts>\n")
-	for i, z := range zones {
-		samplePart(b, i, z)
-	}
-	b.WriteString("</SampleParts></MultiSampleMap>\n</Player>\n")
-	if len(zones) > 0 {
-		pitch(b, zones[0].Transpose)
-	}
-	if !multi {
-		mode := 0
-		if classic {
-			mode = 0
-		}
-		fmt.Fprintf(b, "<Globals><PlaybackMode Value=\"%d\" /></Globals>\n", mode)
-	}
-	fmt.Fprintf(b, "</%s>\n", tag)
-}
-
-func wrap(inner func(b *strings.Builder)) []byte {
 	var b strings.Builder
-	b.WriteString(header)
-	inner(&b)
-	b.WriteString("</Ableton>\n")
-	return []byte(b.String())
+	line := func(f string, a ...any) { fmt.Fprintf(&b, indent+f+"\n", a...) }
+	line(`<RelativePathType Value="%d" />`, relType)
+	line(`<RelativePath Value="%s" />`, esc(rel))
+	line(`<Path Value="%s" />`, esc(z.Path))
+	line(`<Type Value="3" />`)
+	line(`<LivePackName Value="" />`)
+	line(`<LivePackId Value="" />`)
+	line(`<OriginalFileSize Value="%d" />`, z.FileSize)
+	line(`<OriginalCrc Value="0" />`)
+	line(`<SourceHint Value="" />`)
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
-// Simpler is one sample in Simpler. Loop, root and window come from z.
-func Simpler(z Zone) []byte {
+func browserPath(z Zone) string {
+	r, ok := strings.CutPrefix(z.Path, UserLibrary)
+	if !ok {
+		return ""
+	}
+	return "query:UserLibrary#" + strings.ReplaceAll(r, "/", ":")
+}
+
+func loopXML(b *strings.Builder, tag string, start, end, mode, xfade int) {
+	fmt.Fprintf(b, "\t\t\t\t\t\t<%s>\n\t\t\t\t\t\t\t<Start Value=\"%d\" />\n\t\t\t\t\t\t\t<End Value=\"%d\" />\n\t\t\t\t\t\t\t<Mode Value=\"%d\" />\n\t\t\t\t\t\t\t<Crossfade Value=\"%d\" />\n\t\t\t\t\t\t\t<Detune Value=\"0\" />\n\t\t\t\t\t\t</%s>\n",
+		tag, start, end, mode, xfade, tag)
+}
+
+func rangeXML(b *strings.Builder, tag string, lo, hi int) {
+	fmt.Fprintf(b, "\t\t\t\t\t\t<%s>\n\t\t\t\t\t\t\t<Min Value=\"%d\" />\n\t\t\t\t\t\t\t<Max Value=\"%d\" />\n\t\t\t\t\t\t\t<CrossfadeMin Value=\"%d\" />\n\t\t\t\t\t\t\t<CrossfadeMax Value=\"%d\" />\n\t\t\t\t\t\t</%s>\n",
+		tag, lo, hi, lo, hi, tag)
+}
+
+// samplePart is one <MultiSamplePart>, laid out as Live writes it. releaseMode
+// is Live's default for the device: 3 in Simpler, 0 in Sampler.
+func samplePart(b *strings.Builder, id int, z Zone, selected bool, releaseMode int) {
+	s, e := z.window()
+	last := e - 1 // Live stores the last frame, the file has Frames of them
+	const t6 = "\t\t\t\t\t\t"
+	fmt.Fprintf(b, "\t\t\t\t\t<MultiSamplePart Id=\"%d\" InitUpdateAreSlicesFromOnsetsEditableAfterRead=\"false\" HasImportedSlicePoints=\"false\" NeedsAnalysisData=\"false\">\n", id)
+	fmt.Fprintf(b, t6+"<LomId Value=\"0\" />\n"+t6+"<Name Value=\"%s\" />\n"+t6+"<Selection Value=\"%t\" />\n"+t6+"<IsActive Value=\"true\" />\n"+t6+"<Solo Value=\"false\" />\n",
+		esc(z.Name), selected)
+	rangeXML(b, "KeyRange", z.KeyLo, z.KeyHi)
+	rangeXML(b, "VelocityRange", max(z.VelLo, 1), min(max(z.VelHi, 1), 127))
+	rangeXML(b, "SelectorRange", 0, 127)
+	fmt.Fprintf(b, t6+"<RootKey Value=\"%d\" />\n"+t6+"<Detune Value=\"0\" />\n"+t6+"<TuneScale Value=\"100\" />\n"+t6+"<Panorama Value=\"0\" />\n"+t6+"<Volume Value=\"1\" />\n"+t6+"<Link Value=\"false\" />\n", z.Root)
+	fmt.Fprintf(b, t6+"<SampleStart Value=\"%d\" />\n"+t6+"<SampleEnd Value=\"%d\" />\n", s, last)
+	if z.Loop != nil {
+		loopXML(b, "SustainLoop", z.Loop.Start, z.Loop.End, 1, z.Crossfade)
+	} else {
+		loopXML(b, "SustainLoop", 0, last, 0, 0)
+	}
+	loopXML(b, "ReleaseLoop", 0, last, releaseMode, 0)
+	ref := fileRef(z, t6+"\t\t")
+	b.WriteString(t6 + "<SampleRef>\n" + t6 + "\t<FileRef>\n" + ref + "\n" + t6 + "\t</FileRef>\n")
+	fmt.Fprintf(b, t6+"\t<LastModDate Value=\"%d\" />\n", z.ModTime)
+	b.WriteString(t6 + "\t<SourceContext>\n" + t6 + "\t\t<SourceContext Id=\"0\">\n" + t6 + "\t\t\t<OriginalFileRef>\n" + t6 + "\t\t\t\t<FileRef Id=\"0\">\n")
+	b.WriteString(fileRef(z, t6+"\t\t\t\t\t") + "\n")
+	fmt.Fprintf(b, t6+"\t\t\t\t</FileRef>\n"+t6+"\t\t\t</OriginalFileRef>\n"+t6+"\t\t\t<BrowserContentPath Value=\"%s\" />\n"+t6+"\t\t\t<LocalFiltersJson Value=\"\" />\n"+t6+"\t\t</SourceContext>\n"+t6+"\t</SourceContext>\n", esc(browserPath(z)))
+	fmt.Fprintf(b, t6+"\t<SampleUsageHint Value=\"0\" />\n"+t6+"\t<DefaultDuration Value=\"%d\" />\n"+t6+"\t<DefaultSampleRate Value=\"%d\" />\n"+t6+"\t<SamplesToAutoWarp Value=\"0\" />\n"+t6+"</SampleRef>\n", z.Frames, z.Rate)
+	// Live wants warp markers even when the sample is not warped: the whole
+	// file as 4 beats, and a short tail marker, as it writes for a new sample.
+	dur := float64(z.Frames) / float64(max(z.Rate, 1))
+	fmt.Fprintf(b, t6+"<SlicingThreshold Value=\"100\" />\n"+t6+"<SlicingBeatGrid Value=\"4\" />\n"+t6+"<SlicingRegions Value=\"8\" />\n"+t6+"<SlicingStyle Value=\"0\" />\n")
+	fmt.Fprintf(b, t6+"<SampleWarpProperties>\n"+t6+"\t<WarpMarkers>\n"+t6+"\t\t<WarpMarker Id=\"0\" SecTime=\"0\" BeatTime=\"0\" />\n"+t6+"\t\t<WarpMarker Id=\"1\" SecTime=\"%.17g\" BeatTime=\"4\" />\n"+t6+"\t\t<WarpMarker Id=\"2\" SecTime=\"%.17g\" BeatTime=\"4.03125\" />\n"+t6+"\t</WarpMarkers>\n", dur, dur*1.0078125)
+	b.WriteString(warpTail)
+	b.WriteString(t6 + "<InitialSlicePointsFromOnsets />\n" + t6 + "<SlicePoints />\n" + t6 + "<ManualSlicePoints />\n" + t6 + "<BeatSlicePoints />\n" + t6 + "<RegionSlicePoints />\n")
+	b.WriteString(t6 + "<UseDynamicBeatSlices Value=\"true\" />\n" + t6 + "<UseDynamicRegionSlices Value=\"true\" />\n" + t6 + "<AreSlicesFromOnsetsEditable Value=\"false\" />\n")
+	b.WriteString("\t\t\t\t\t</MultiSamplePart>\n")
+}
+
+// warpTail is the rest of <SampleWarpProperties>, the same in every part.
+const warpTail = `							<WarpMode Value="0" />
+							<GranularityTones Value="30" />
+							<GranularityTexture Value="65" />
+							<FluctuationTexture Value="25" />
+							<ComplexProFormants Value="100" />
+							<ComplexProEnvelope Value="128" />
+							<TransientResolution Value="6" />
+							<TransientLoopMode Value="2" />
+							<TransientEnvelope Value="100" />
+							<IsWarped Value="false" />
+							<Onsets>
+								<UserOnsets />
+								<HasUserOnsets Value="false" />
+							</Onsets>
+							<TimeSignature>
+								<TimeSignatures>
+									<RemoteableTimeSignature Id="0">
+										<Numerator Value="4" />
+										<Denominator Value="4" />
+										<Time Value="0" />
+									</RemoteableTimeSignature>
+								</TimeSignatures>
+							</TimeSignature>
+							<BeatGrid>
+								<FixedNumerator Value="1" />
+								<FixedDenominator Value="16" />
+								<GridIntervalPixel Value="20" />
+								<Ntoles Value="2" />
+								<SnapToGrid Value="true" />
+								<Fixed Value="false" />
+							</BeatGrid>
+						</SampleWarpProperties>
+`
+
+func partsXML(zones []Zone, releaseMode int) string {
+	var b strings.Builder
+	if len(zones) == 0 {
+		return "<SampleParts />"
+	}
+	b.WriteString("<SampleParts>\n")
+	for i, z := range zones {
+		samplePart(&b, i, z, i == 0, releaseMode)
+	}
+	b.WriteString("\t\t\t\t</SampleParts>")
+	return b.String()
+}
+
+// transpose splits semitones into Live's whole and fine (cents) parts.
+func transpose(semis float64) (int, int) {
+	whole := int(semis)
+	return whole, int((semis - float64(whole)) * 100)
+}
+
+func fill(tmpl string, kv ...string) string {
+	r := strings.NewReplacer(kv...)
+	return r.Replace(tmpl)
+}
+
+func defaults(z *Zone) {
 	if z.KeyHi == 0 && z.KeyLo == 0 {
 		z.KeyLo, z.KeyHi = 0, 127
 	}
 	if z.VelHi == 0 {
 		z.VelLo, z.VelHi = 1, 127
 	}
-	return wrap(func(b *strings.Builder) {
-		b.WriteString("<InstrumentGroupDevicePreset><Device>\n")
-		simplerDevice(b, 0, []Zone{z}, false, true)
-		b.WriteString("</Device></InstrumentGroupDevicePreset>\n")
-	})
+}
+
+// Simpler is one sample in Simpler. Loop, root and window come from z.
+func Simpler(z Zone) []byte {
+	defaults(&z)
+	whole, fine := transpose(z.Transpose)
+	return []byte(fill(tmplSimpler, "{{PARTS}}", partsXML([]Zone{z}, 3),
+		"{{TRANSPOSE_KEY}}", fmt.Sprint(whole), "{{TRANSPOSE_FINE}}", fmt.Sprint(fine), "{{PLAYBACK}}", "0"))
 }
 
 // Sampler is many zones in one Sampler: the auto-sampler's result.
 func Sampler(zones []Zone) []byte {
-	return wrap(func(b *strings.Builder) {
-		b.WriteString("<InstrumentGroupDevicePreset><Device>\n")
-		simplerDevice(b, 0, zones, true, false)
-		b.WriteString("</Device></InstrumentGroupDevicePreset>\n")
-	})
+	zs := append([]Zone(nil), zones...)
+	for i := range zs {
+		defaults(&zs[i])
+	}
+	return []byte(fill(tmplSampler, "{{PARTS}}", partsXML(zs, 0)))
 }
 
-// DrumRack maps each pad's slice to its own pad, with choke group.
+// DrumRack maps each pad's slice to its own pad, with choke group. Each pad is
+// a Simpler in One-Shot mode, so a hit plays out when the pad is let go.
 func DrumRack(pads []Pad) []byte {
-	return wrap(func(b *strings.Builder) {
-		b.WriteString("<GroupDevicePreset><Device>\n<DrumGroupDevice Id=\"0\">\n")
-		b.WriteString("<LomId Value=\"0\" /><IsExpanded Value=\"true\" /><On><LomId Value=\"0\" /><Manual Value=\"true\" /></On>\n<Branches>\n")
-		for i, p := range pads {
-			z := p.Zone
-			z.KeyLo, z.KeyHi = 0, 127
-			if z.Root == 0 {
-				z.Root = 60
-			}
-			if z.VelHi == 0 {
-				z.VelLo, z.VelHi = 1, 127
-			}
-			fmt.Fprintf(b, "<DrumBranch Id=\"%d\">\n<LomId Value=\"0\" /><Name Value=\"%s\" /><IsSelected Value=\"%t\" />\n", i, esc(z.Name), i == 0)
-			// Live stores the receiving note as 128 minus the note.
-			fmt.Fprintf(b, "<ZoneSettings><ReceivingNote Value=\"%d\" /><SendingNote Value=\"60\" /><ChokeGroup Value=\"%d\" /></ZoneSettings>\n", 128-p.Note, p.Choke)
-			b.WriteString("<DeviceChain><Devices>\n")
-			simplerDevice(b, 0, []Zone{z}, false, false)
-			b.WriteString("</Devices></DeviceChain>\n</DrumBranch>\n")
+	var b strings.Builder
+	for i, p := range pads {
+		z := p.Zone
+		z.KeyLo, z.KeyHi = 0, 127
+		if z.Root == 0 {
+			z.Root = 60
 		}
-		b.WriteString("</Branches>\n</DrumGroupDevice>\n</Device></GroupDevicePreset>\n")
-	})
+		if z.VelHi == 0 {
+			z.VelLo, z.VelHi = 1, 127
+		}
+		whole, fine := transpose(z.Transpose)
+		// Live stores the receiving note as 128 minus the note.
+		b.WriteString(fill(tmplDrumBranch, "{{ID}}", fmt.Sprint(i), "{{NAME}}", esc(z.Name),
+			"{{PARTS}}", partsXML([]Zone{z}, 3), "{{SEED}}", fmt.Sprint(-1659344615+i*7919),
+			"{{NOTE}}", fmt.Sprint(128-p.Note), "{{CHOKE}}", fmt.Sprint(p.Choke),
+			"{{PLAYBACK}}", "1", "{{TRANSPOSE_KEY}}", fmt.Sprint(whole), "{{TRANSPOSE_FINE}}", fmt.Sprint(fine)))
+	}
+	return []byte(fill(tmplDrumRack, "{{BRANCHES}}", b.String()))
 }
 
 // WritePreset gzips the XML into path (.adv or .adg). With keepXML it also

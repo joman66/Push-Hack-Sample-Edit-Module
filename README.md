@@ -73,6 +73,8 @@ turn for sample-accurate steps.
 
 Files go to Live's User Library: WAV in `Samples/Imported/SampleEdit`, presets under
 `Presets/Instruments/{Simpler,Sampler,Drum Rack}/SampleEdit`. Change them in `hack.json` `settings.library`.
+Presets are filled in from templates that Live 12.4.6 saved on a Push 3 (`src/export/tmpl`, built by
+`scripts/make_preset_templates.py`). Drum Rack pads are Simpler in One-Shot mode.
 WAVs are 24-bit, at the rate of the take, with loop (`smpl`), slice regions (`cue`/`adtl`) and tempo (`acid`) tags.
 
 ## Limits
