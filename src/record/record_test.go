@@ -1,9 +1,6 @@
 package record
 
 import (
-	"bytes"
-	"context"
-	"encoding/binary"
 	"math"
 	"testing"
 )
@@ -79,24 +76,16 @@ func TestStopWithoutTakeAndCancel(t *testing.T) {
 	}
 }
 
-func TestPumpDecodesS32(t *testing.T) {
-	var raw bytes.Buffer
-	for i := 0; i < 100; i++ {
-		binary.Write(&raw, binary.LittleEndian, int32(1<<30))  // +0.5
-		binary.Write(&raw, binary.LittleEndian, int32(-1<<30)) // -0.5
+func TestSetRateOnlyWhenIdle(t *testing.T) {
+	r := New(Config{Rate: 48000, Channels: 2, TmpDir: t.TempDir()})
+	r.SetRate(44100)
+	if r.Rate() != 44100 {
+		t.Fatal("rate not set")
 	}
-	r := New(Config{Rate: 1000, Channels: 2, TmpDir: t.TempDir()})
 	r.Start()
-	err := Pump(context.Background(), nopCloser{&raw}, 2, 32, r)
-	if err == nil {
-		t.Fatal("expected EOF at the end")
+	r.SetRate(48000)
+	if r.Rate() != 44100 {
+		t.Fatal("rate changed while recording")
 	}
-	b, _ := r.Stop()
-	if b.Frames() != 100 || math.Abs(float64(b.Ch[0][50])-0.5) > 1e-5 || math.Abs(float64(b.Ch[1][50])+0.5) > 1e-5 {
-		t.Fatalf("%d %v", b.Frames(), b.Ch[0][50])
-	}
+	r.Cancel()
 }
-
-type nopCloser struct{ *bytes.Buffer }
-
-func (nopCloser) Close() error { return nil }

@@ -21,6 +21,15 @@ type Monitor struct {
 // New makes a monitor for input at inRate.
 func New(inRate int) *Monitor { return &Monitor{inRate: inRate} }
 
+// SetInRate sets the rate of the pushed audio. Switching on clears the buffer.
+func (m *Monitor) SetInRate(rate int) {
+	m.mu.Lock()
+	if rate > 0 {
+		m.inRate = rate
+	}
+	m.mu.Unlock()
+}
+
 // On tells if the monitor is audible.
 func (m *Monitor) On() bool { m.mu.Lock(); defer m.mu.Unlock(); return m.on }
 

@@ -48,8 +48,7 @@ func newApp(t *testing.T) (*App, *saved) {
 	t.Helper()
 	sv := &saved{}
 	rec := record.New(record.Config{Rate: 48000, Channels: 2, TmpDir: t.TempDir()})
-	a := New(Hooks{Save: sv, LiveTempo: func() float64 { return 0 }, SourceNames: []string{"Line", "ADAT", "Loop"},
-		SourceOn: func(int) error { return nil }, SourceOff: func() {}}, rec, playback.New(48000))
+	a := New(Hooks{Save: sv, LiveTempo: func() float64 { return 0 }, SourceOn: func() error { return nil }, SourceOff: func() {}}, rec, playback.New(48000))
 	return a, sv
 }
 
@@ -416,10 +415,6 @@ func TestRecordFlow(t *testing.T) {
 	if a.S.ThresholdDB <= -40 {
 		t.Fatal("threshold encoder")
 	}
-	bot(a, 3)
-	if a.S.Source != 1 {
-		t.Fatal("source cycle")
-	}
 	bot(a, 4)
 	if !a.S.Mono {
 		t.Fatal("mono toggle")
@@ -513,24 +508,18 @@ func TestTickClearsMessage(t *testing.T) {
 func TestMonitorToggle(t *testing.T) {
 	a, _ := newApp(t)
 	var calls []string
-	a.H.Monitor = func(on bool, src int) error {
-		calls = append(calls, fmt.Sprintf("%v/%d", on, src))
+	a.H.Monitor = func(on bool) error {
+		calls = append(calls, fmt.Sprintf("%v", on))
 		return nil
 	}
 	a.Mode = ModeRecord
-	a.CC(push3.CCShift, 127)
-	bot(a, 3) // Shift + Input
-	a.CC(push3.CCShift, 0)
-	if !a.S.Monitor {
-		t.Fatal("shift + Input should switch the monitor on")
-	}
-	bot(a, 3) // plain Input changes the source, and the monitor follows
-	if a.S.Source != 1 || len(calls) != 2 || calls[1] != "true/1" {
-		t.Fatalf("source %d calls %v", a.S.Source, calls)
+	bot(a, 3) // Monitor key
+	if !a.S.Monitor || len(calls) != 1 || calls[0] != "true" {
+		t.Fatalf("Monitor key should switch it on: %v", calls)
 	}
 	a.Page = 1
 	bot(a, 2) // page 2 key
-	if a.S.Monitor || calls[len(calls)-1] != "false/1" {
+	if a.S.Monitor || calls[len(calls)-1] != "false" {
 		t.Fatalf("monitor %v calls %v", a.S.Monitor, calls)
 	}
 	a.Page = 0
@@ -539,14 +528,14 @@ func TestMonitorToggle(t *testing.T) {
 		t.Fatal("encoder should switch it on")
 	}
 	a.MonitorStop()
-	if a.S.Monitor || calls[len(calls)-1] != "false/1" {
+	if a.S.Monitor || calls[len(calls)-1] != "false" {
 		t.Fatalf("MonitorStop: %v %v", a.S.Monitor, calls)
 	}
 }
 
 func TestMonitorErrorStaysOff(t *testing.T) {
 	a, _ := newApp(t)
-	a.H.Monitor = func(bool, int) error { return errors.New("audio bus not running") }
+	a.H.Monitor = func(bool) error { return errors.New("audio bus not running") }
 	a.Mode = ModeRecord
 	a.Page = 1
 	bot(a, 2)

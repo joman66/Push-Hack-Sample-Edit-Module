@@ -128,15 +128,11 @@ func (a *App) labels(f *Frame) {
 			set(0, "Thresh", fmt.Sprintf("%.0fdB", s.ThresholdDB))
 			set(1, "PreRoll", fmt.Sprintf("%.2fs", s.PreRollSec))
 			set(2, "Monitor", map[bool]string{true: "On", false: "Off"}[s.Monitor])
-			src := "-"
-			if len(a.H.SourceNames) > 0 {
-				src = a.H.SourceNames[s.Source%len(a.H.SourceNames)]
-			}
 			*b = [8]Key{
 				{Label: map[record.State]string{record.Idle: "Arm", record.Armed: "Start", record.Recording: "Stop"}[st], On: st != record.Idle},
 				{Label: "Cancel", Off: st == record.Idle},
 				{Label: "AutoGo", On: s.AutoTrigger},
-				{Label: src},
+				{Label: "Monitor", On: s.Monitor},
 				{Label: map[bool]string{true: "Mono", false: "Stereo"}[s.Mono]},
 				{Label: "Auto>"},
 				{Label: "Load"},
@@ -339,9 +335,6 @@ func (a *App) ResetLEDs() {
 	a.ledCC = map[byte]uint8{}
 	a.ledPad = [64]int16{}
 }
-
-// SourceIndex is the chosen input.
-func (a *App) SourceIndex() int { a.mu.Lock(); defer a.mu.Unlock(); return a.S.Source }
 
 // PaintLEDs sends the LEDs that changed since the last call.
 func (a *App) PaintLEDs() {

@@ -338,7 +338,7 @@ func (a *App) setMonitor(on bool) {
 		a.say("Monitor: no audio out")
 		return
 	}
-	if err := a.H.Monitor(on, a.S.Source); err != nil {
+	if err := a.H.Monitor(on); err != nil {
 		a.S.Monitor = false
 		a.say("Monitor: %s", asciiErr(err))
 		return
@@ -352,7 +352,7 @@ func (a *App) MonitorStop() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.S.Monitor && a.H.Monitor != nil {
-		a.H.Monitor(false, a.S.Source)
+		a.H.Monitor(false)
 	}
 	a.S.Monitor = false
 	a.dirty = true
@@ -385,17 +385,7 @@ func (a *App) botRecord(i int) {
 		a.S.AutoTrigger = !a.S.AutoTrigger
 		a.say("Auto-start %s", onOff(a.S.AutoTrigger))
 	case 3:
-		if a.shift {
-			a.toggleMonitor()
-			return
-		}
-		if n := len(a.H.SourceNames); n > 0 && a.Rec.State() == record.Idle {
-			a.S.Source = (a.S.Source + 1) % n
-			a.say("Input %s", a.H.SourceNames[a.S.Source])
-			if a.S.Monitor { // follow the new input
-				a.setMonitor(true)
-			}
-		}
+		a.toggleMonitor()
 	case 4:
 		a.S.Mono = !a.S.Mono
 		a.syncRecorder()

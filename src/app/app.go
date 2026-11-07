@@ -52,7 +52,6 @@ type Settings struct {
 	PreRollSec  float64
 	AutoTrigger bool
 	Mono        bool
-	Source      int
 	Monitor     bool // the live input is audible on the audio bus
 	Auto        autosample.Config
 	// trim
@@ -100,15 +99,14 @@ func DefaultSettings() Settings {
 
 // Hooks are the things main provides.
 type Hooks struct {
-	LiveTempo   func() float64                  // 0 when unknown
-	Leave       func()                          // give the surface back to Live
-	SourceNames []string                        // input choices, for the Source key
-	SourceOn    func(source int) error          // start capturing
-	SourceOff   func()                          // stop capturing
-	Monitor     func(on bool, source int) error // hear the input live; nil if there is no audio out
-	AutoSample  func(ctx context.Context, c autosample.Config, p autosample.Progress) ([]autosample.Zone, error)
-	Save        Saver
-	Now         func() time.Time
+	LiveTempo  func() float64      // 0 when unknown
+	Leave      func()              // give the surface back to Live
+	SourceOn   func() error        // start capturing the input
+	SourceOff  func()              // stop capturing
+	Monitor    func(on bool) error // hear the input live; nil if there is no audio out
+	AutoSample func(ctx context.Context, c autosample.Config, p autosample.Progress) ([]autosample.Zone, error)
+	Save       Saver
+	Now        func() time.Time
 }
 
 // Saver writes files. It is an interface so tests need no disk.
@@ -297,7 +295,7 @@ func (a *App) recToggle() {
 	case record.Idle:
 		a.syncRecorder()
 		if a.H.SourceOn != nil {
-			if err := a.H.SourceOn(a.S.Source); err != nil {
+			if err := a.H.SourceOn(); err != nil {
 				a.say("Input: %s", asciiErr(err))
 				return
 			}
