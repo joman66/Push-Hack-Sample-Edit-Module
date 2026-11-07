@@ -24,10 +24,19 @@ An MPC-style sampler and editor that runs on a Push 3 Standalone with no Live se
 - A loaded file gets the export name `<name>-edit` so an export cannot overwrite it.
 - Preview plays through the same engine and audio bus as the editor.
 
+## Presets from real Live files (2026-11-07)
+- The first exporter wrote XML from memory and Live did not load it. Live needs every node of a real preset.
+- `src/export/tmpl/*.xml` are cut from a Simpler, a Sampler (multi zone) and a Drum Rack that Live 12.4.6 saved on a Push 3.
+  `scripts/make_preset_templates.py` rebuilds them and leaves `{{PLACEHOLDERS}}` for the parts that change.
+- The Sampler reference is a factory preset, so the script resets its sound (filter, pitch envelope, sub oscillator, transpose 12, key zone shift) to the plain Simpler values.
+- Live stores the last frame in `SampleEnd` (frames - 1), a pad's `ReceivingNote` as 128 minus the note, and a sample in the User Library as path type 6 with a relative path.
+- Checked: a Simpler made with the values of the reference matches the real file except the CRC and slice points. A Drum Rack matches except names, samples, seeds and One-Shot.
+- Not checked on a Push: loading the new files, the CRC of 0, One-Shot pads.
+
 ## Layout
 `src/audio` edits and history, `src/dsp` stretch and pitch, `src/slicer`, `src/wavio`,
 `src/autosample`, `src/export`, `src/record`, `src/playback`, `src/library`, `src/app`
 (controller), `src/ui` (screen), `src/main.go` (wiring).
 
 ## Not verified on a device
-Presets in Live, the Link input on a Push, MIDI out port, audio bus preview, Sample Manager.
+The new presets in Live, the Link input on a Push, MIDI out port, audio bus preview, Sample Manager.

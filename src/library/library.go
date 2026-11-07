@@ -80,7 +80,11 @@ func zoneFor(path, name string, b *audio.Buffer) export.Zone {
 	if st, err := os.Stat(path); err == nil {
 		size = st.Size()
 	}
-	return export.Zone{Path: path, Name: name, Frames: sc(b.Frames(), float64(ExportRate)/float64(b.Rate)),
+	var mod int64
+	if st, err := os.Stat(path); err == nil {
+		mod = st.ModTime().Unix()
+	}
+	return export.Zone{Path: path, Name: name, ModTime: mod, Frames: sc(b.Frames(), float64(ExportRate)/float64(b.Rate)),
 		Rate: ExportRate, FileSize: size, KeyLo: 0, KeyHi: 127, VelLo: 1, VelHi: 127}
 }
 

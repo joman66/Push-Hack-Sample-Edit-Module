@@ -50,7 +50,7 @@ func TestResamplesTo48kAndScalesMarkers(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(strings.TrimSuffix(pre, ".adv") + ".xml")
-	if !strings.Contains(string(raw), `<Start Value="200" /><End Value="400" />`) {
+	if !strings.Contains(string(raw), "<Start Value=\"200\" />\n\t\t\t\t\t\t\t<End Value=\"400\" />") {
 		t.Fatal("loop points should be scaled to 48k")
 	}
 }
@@ -65,7 +65,7 @@ func TestDrumRackAndSampler(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(strings.TrimSuffix(pre, ".adg") + ".xml")
-	if strings.Count(string(raw), "<DrumBranch ") != 2 || !strings.Contains(string(raw), `<ChokeGroup Value="1" />`) {
+	if strings.Count(string(raw), "<DrumBranchPreset ") != 2 || !strings.Contains(string(raw), `<ChokeGroup Value="1" />`) {
 		t.Fatal("drum rack content")
 	}
 	zs := []autosample.Zone{
