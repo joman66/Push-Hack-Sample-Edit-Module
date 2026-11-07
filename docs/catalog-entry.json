@@ -1,0 +1,10 @@
+{
+  "id": "sample-edit",
+  "name": "Sample Edit",
+  "description": "Offline sampler and editor: record, trim, chop, process, export to Simpler, Sampler or Drum Rack.",
+  "author": "federico-pepe",
+  "homepage": "https://github.com/federico-pepe/push-hack-sample-edit",
+  "github_repo": "federico-pepe/push-hack-sample-edit",
+  "default_branch": "main",
+  "asset_name": "sample-edit.tar.gz"
+}
