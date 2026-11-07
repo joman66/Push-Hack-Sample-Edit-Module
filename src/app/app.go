@@ -106,6 +106,8 @@ type Hooks struct {
 	Monitor    func(on bool) error // hear the input live; nil if there is no audio out
 	AutoSample func(ctx context.Context, c autosample.Config, p autosample.Progress) ([]autosample.Zone, error)
 	Save       Saver
+	Files      FileStore // the device's sample folder, for the Sample Manager
+	StartDir   string    // where the manager opens first
 	Now        func() time.Time
 }
 
@@ -115,7 +117,6 @@ type Saver interface {
 	SaveSimpler(name, wavPath string, b *audio.Buffer, root int, loop *Loop, crossfade int, transpose float64) (string, error)
 	SaveDrumRack(name, wavPath string, b *audio.Buffer, slices []slicer.Slice) (string, error)
 	SaveSampler(name string, zones []autosample.Zone) (string, error)
-	Load(name string) (*audio.Buffer, error)
 }
 
 // Loop is a loop range in frames.
@@ -148,6 +149,8 @@ type App struct {
 	asProg  string
 	voice   int
 	exports int
+	mgr     *Manager // the Sample Manager window, nil when closed
+	mgrDir  string   // the folder it was last in
 	led     LEDSink
 	ledCC   map[byte]uint8
 	ledPad  [64]int16
@@ -343,6 +346,10 @@ func (a *App) Tick() bool {
 		a.dirty = true
 	}
 	st := a.Rec.State()
+	if a.mgr != nil && a.mgr.Preview != "" && !a.Eng.Playing() {
+		a.mgr.Preview = "" // the preview played to the end
+		a.dirty = true
+	}
 	if st == record.Recording || st == record.Armed || a.Eng.Playing() {
 		a.dirty = true
 	}

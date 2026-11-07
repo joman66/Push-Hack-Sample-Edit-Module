@@ -84,3 +84,18 @@ func TestDrumRackAndSampler(t *testing.T) {
 		t.Fatal("sampler parts")
 	}
 }
+
+func TestBrowseRoot(t *testing.T) {
+	d := DefaultDirs()
+	if BrowseRoot(d) != UserSamples {
+		t.Fatalf("default should be the User Library samples: %s", BrowseRoot(d))
+	}
+	d.Samples = "/mnt/usb/samples"
+	if BrowseRoot(d) != "/mnt/usb/samples" {
+		t.Fatal("outside the User Library: just that folder")
+	}
+	d.Browse = "/data/Music/"
+	if BrowseRoot(d) != "/data/Music" {
+		t.Fatal("explicit root")
+	}
+}

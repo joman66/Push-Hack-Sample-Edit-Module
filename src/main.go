@@ -28,6 +28,7 @@ import (
 	"github.com/federico-pepe/push-hack-sample-edit/src/app"
 	"github.com/federico-pepe/push-hack-sample-edit/src/audio"
 	"github.com/federico-pepe/push-hack-sample-edit/src/autosample"
+	"github.com/federico-pepe/push-hack-sample-edit/src/browser"
 	"github.com/federico-pepe/push-hack-sample-edit/src/library"
 	"github.com/federico-pepe/push-hack-sample-edit/src/monitor"
 	"github.com/federico-pepe/push-hack-sample-edit/src/playback"
@@ -77,6 +78,7 @@ func main() {
 		if d.Drum != "" {
 			dirs.Drum = d.Drum
 		}
+		dirs.Browse = d.Browse
 	}
 	dirs.KeepXML = s.KeepXML
 	if s.Rate == 0 {
@@ -130,7 +132,9 @@ func main() {
 			}
 			return src.setMonitor(ctx, on, rec.State() == record.Idle)
 		},
-		Save: &library.Library{D: dirs},
+		Save:     &library.Library{D: dirs},
+		Files:    &browser.Store{Root: library.BrowseRoot(dirs)},
+		StartDir: dirs.Samples,
 		AutoSample: func(c context.Context, cfg autosample.Config, p autosample.Progress) ([]autosample.Zone, error) {
 			o := getOut()
 			if o == nil {

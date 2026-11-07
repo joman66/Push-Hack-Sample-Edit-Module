@@ -11,6 +11,8 @@
 
 ### Added
 - Live monitor of the input (Monitor key, Enc 3).
+- Sample Manager window (Record > Load): browse the sample folders on the device, load, preview,
+  copy, paste and delete (with confirm) WAV files. Replaces Load reloading only the last export.
 - First version of Sample Edit, an app of Push Hack Home.
 - Record page: pre-roll, threshold auto-start, mono or stereo, direct-to-disk take.
 - Auto-sampler: note stride, 1 to 8 velocity layers, hold and release, loop point search.

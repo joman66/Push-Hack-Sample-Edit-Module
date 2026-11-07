@@ -288,3 +288,54 @@ func Write(path string, b *audio.Buffer, m *Meta) error {
 	}
 	return w.Close(m)
 }
+
+// Info is what a WAV header says, read without loading the audio.
+type Info struct {
+	Rate, Channels, Bits, Frames int
+}
+
+// Probe reads only the chunk headers of a WAV file.
+func Probe(path string) (Info, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return Info{}, err
+	}
+	defer f.Close()
+	var h [12]byte
+	if _, err := f.ReadAt(h[:], 0); err != nil || string(h[0:4]) != "RIFF" || string(h[8:12]) != "WAVE" {
+		return Info{}, errors.New("not a WAV file")
+	}
+	var in Info
+	haveFmt, haveData := false, false
+	dataBytes := 0
+	for p := int64(12); ; {
+		var ch [8]byte
+		if _, err := f.ReadAt(ch[:], p); err != nil {
+			break
+		}
+		sz := int64(le.Uint32(ch[4:]))
+		switch string(ch[0:4]) {
+		case "fmt ":
+			var b [16]byte
+			if _, err := f.ReadAt(b[:], p+8); err != nil {
+				return Info{}, errors.New("short fmt chunk")
+			}
+			in.Channels = int(le.Uint16(b[2:]))
+			in.Rate = int(le.Uint32(b[4:]))
+			in.Bits = int(le.Uint16(b[14:]))
+			haveFmt = true
+		case "data":
+			dataBytes = int(sz)
+			haveData = true
+		}
+		if haveFmt && haveData {
+			break
+		}
+		p += 8 + sz + sz&1
+	}
+	if !haveFmt || !haveData || in.Channels < 1 || in.Bits < 8 {
+		return Info{}, errors.New("not a usable WAV")
+	}
+	in.Frames = dataBytes / (in.Channels * in.Bits / 8)
+	return in, nil
+}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/federico-pepe/push-hack-sample-edit/src/app"
 	"github.com/federico-pepe/push-hack-sample-edit/src/audio"
@@ -26,6 +27,7 @@ type Dirs struct {
 	Sampler string // Sampler presets (.adv)
 	Drum    string // Drum Rack presets (.adg)
 	KeepXML bool   // leave a plain .xml next to each preset
+	Browse  string // top folder the Sample Manager may show; empty = auto
 }
 
 // DefaultDirs are inside Live's User Library on Push.
@@ -140,4 +142,20 @@ func (l *Library) SaveSampler(name string, zones []autosample.Zone) (string, err
 // Load reads <Samples>/<name>.wav.
 func (l *Library) Load(name string) (*audio.Buffer, error) {
 	return wavio.Read(filepath.Join(l.D.Samples, export.SafeName(name)+".wav"))
+}
+
+// UserSamples is Live's User Library sample folder on Push.
+const UserSamples = "/data/Music/Ableton/User Library/Samples"
+
+// BrowseRoot is the folder the Sample Manager is limited to: the whole User
+// Library sample folder when the export folder is inside it, so you can also
+// reach samples from other places, else just the export folder.
+func BrowseRoot(d Dirs) string {
+	if d.Browse != "" {
+		return filepath.Clean(d.Browse)
+	}
+	if rel, err := filepath.Rel(UserSamples, d.Samples); err == nil && rel != ".." && !strings.HasPrefix(rel, "../") {
+		return UserSamples
+	}
+	return filepath.Clean(d.Samples)
 }
