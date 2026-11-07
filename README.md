@@ -6,7 +6,8 @@ Shift + Help and pick **SAMPLE**. Help goes back to Live.
 
 **It needs push-manager and push-display installed and running.** It draws through
 push-manager's display API. The log tells you if one of them is missing.
-For preview sound, also install **push-audio-loopback**.
+For preview sound and for the input, also install **push-audio-loopback** and leave it in
+**Link** mode (its default).
 
 ## Controls
 
@@ -27,13 +28,18 @@ turn for sample-accurate steps.
 | Page left / right | Second page of Record and Process |
 
 ### Pages
-- **Record**: Arm, Cancel, AutoGo (start on threshold), Input (Line, ADAT, Loop), Mono/Stereo,
+- **Record**: Arm, Cancel, AutoGo (start on threshold), Monitor, Mono/Stereo,
   Auto> (auto-sampler), Load, Clear. Enc 1 threshold, Enc 2 pre-roll.
+  **Input.** Sample Edit has one stereo input, **Sample in**. You choose its source in the
+  **Link inputs** matrix on the web page of push-audio-loopback (Push Hack menu, Web UI): click
+  the dot where a Link channel (a Live track, a return, Main, or the output of another hack)
+  meets the column **SampleEdit / Sample in**. The route is saved there and stays after a
+  restart. With nothing connected, the take is empty. The input runs at 44.1 kHz, so takes are
+  44.1 kHz too.
   **Monitor** plays the live input on the audio bus so you hear what it picks up. Turn it
-  with **Shift + Input**, with Enc 3 (right is on, left is off), or with the Monitor key on the second
-  Record page. Changing the input moves the monitor to the new input. It switches off when
-  Live gets the surface back. It needs the audio bus (push-audio-loopback) and adds about one
-  audio period of delay plus the input's own. Take care with feedback: do not route
+  with the Monitor key (lower key 4), with Enc 3 (right is on, left is off), or with the Monitor key
+  on the second Record page. It switches off when Live gets the surface back. It adds
+  about one audio period of delay plus the input's own. Take care with feedback: do not route
   Live's output back into this input while monitoring.
   *Auto-sampler page*: Low, High, Stride, Layers (1 to 8), Hold, Release, MIDI channel.
   It plays each note on the Push's MIDI out, records it, finds a sustain loop, and keeps the zones.
@@ -49,7 +55,7 @@ turn for sample-accurate steps.
 
 Files go to Live's User Library: WAV in `Samples/Imported/SampleEdit`, presets under
 `Presets/Instruments/{Simpler,Sampler,Drum Rack}/SampleEdit`. Change them in `hack.json` `settings.library`.
-WAVs are 24-bit 48 kHz with loop (`smpl`), slice regions (`cue`/`adtl`) and tempo (`acid`) tags.
+WAVs are 24-bit, at the rate of the take, with loop (`smpl`), slice regions (`cue`/`adtl`) and tempo (`acid`) tags.
 
 ## Limits
 - Mono and stereo only. At most 64 slices (one per pad).
@@ -65,6 +71,6 @@ Install it through Push Hack Catalog, or copy `sample-edit` and `hack.json` to
 `/data/push-hack/hacks/sample-edit/` and run it over SSH.
 
 ## Not verified on a device yet
-The monitor (level, delay, drift between the input card and the bus),
-the presets in Live, `arecord` on Push, the input device names, and the MIDI out port.
+The Link input on a Push (the capture is tested off-device against a real audio bus server),
+the monitor (level, delay), the presets in Live, and the MIDI out port.
 See `plans/2026-11-03-sample-edit-module.md`.

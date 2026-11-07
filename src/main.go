@@ -32,7 +32,6 @@ import (
 	"github.com/federico-pepe/push-hack-sample-edit/src/monitor"
 	"github.com/federico-pepe/push-hack-sample-edit/src/playback"
 	"github.com/federico-pepe/push-hack-sample-edit/src/record"
-	"github.com/federico-pepe/push-hack-sample-edit/src/route"
 	"github.com/federico-pepe/push-hack-sample-edit/src/ui"
 )
 
@@ -41,11 +40,10 @@ const pmBase = "http://127.0.0.1:7701"
 // settings is the extra part of hack.json this hack reads.
 type settings struct {
 	Settings struct {
-		Library *library.Dirs     `json:"library"`
-		Inputs  map[string]string `json:"inputs"`   // name -> ALSA capture device
-		MidiOut string            `json:"midi_out"` // part of the port name
-		Rate    int               `json:"rate"`
-		KeepXML bool              `json:"keep_xml"`
+		Library *library.Dirs `json:"library"`
+		MidiOut string        `json:"midi_out"` // part of the port name
+		Rate    int           `json:"rate"`
+		KeepXML bool          `json:"keep_xml"`
 	} `json:"settings"`
 }
 
@@ -87,7 +85,6 @@ func main() {
 	if s.MidiOut == "" {
 		s.MidiOut = "External Port"
 	}
-	inputs, inputNames := inputList(s.Inputs)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -99,7 +96,11 @@ func main() {
 	eng := playback.New(48000)
 	mon := monitor.New(s.Rate)
 	var busUp atomic.Bool // the audio bus gave us a format, so audio out works
-	src := &sourceCtl{rec: rec, mon: mon, rate: s.Rate, inputs: inputs, names: inputNames}
+	// One audio bus client does both jobs: it plays the preview and it reads
+	// the input that the loopback module's Link inputs matrix connects.
+	bus := audiobus.OpenWithInputs(audiobus.SocketPath(audiobus.DefaultDir), "SampleEdit", -1, []string{inputName})
+	defer bus.Close()
+	src := &sourceCtl{bus: bus, rec: rec, mon: mon}
 
 	var out *midiOut
 	var outMu sync.Mutex
@@ -119,16 +120,15 @@ func main() {
 
 	var a *app.App
 	hooks := app.Hooks{
-		LiveTempo:   func() float64 { t, _ := pm.Tempo(); return t },
-		Leave:       func() { pm.SurfaceLeave("live") },
-		SourceNames: inputNames,
-		SourceOn:    func(i int) error { return src.on(ctx, i) },
-		SourceOff:   src.off,
-		Monitor: func(on bool, i int) error {
+		LiveTempo: func() float64 { t, _ := pm.Tempo(); return t },
+		Leave:     func() { pm.SurfaceLeave("live") },
+		SourceOn:  func() error { return src.on(ctx) },
+		SourceOff: src.off,
+		Monitor: func(on bool) error {
 			if on && !busUp.Load() {
 				return fmt.Errorf("audio bus not running")
 			}
-			return src.setMonitor(ctx, on, i, rec.State() == record.Idle)
+			return src.setMonitor(ctx, on, rec.State() == record.Idle)
 		},
 		Save: &library.Library{D: dirs},
 		AutoSample: func(c context.Context, cfg autosample.Config, p autosample.Progress) ([]autosample.Zone, error) {
@@ -136,7 +136,7 @@ func main() {
 			if o == nil {
 				return nil, fmt.Errorf("no MIDI out port %q", s.MidiOut)
 			}
-			if err := src.on(c, a.SourceIndex()); err != nil {
+			if err := src.on(c); err != nil {
 				return nil, err
 			}
 			defer src.off()
@@ -158,7 +158,7 @@ func main() {
 		}
 	}()
 
-	go audioLoop(ctx, eng, mon, &busUp)
+	go audioLoop(ctx, bus, eng, mon, &busUp)
 	go midiLoop(ctx, a, &focused)
 	go renderLoop(ctx, a, pm, &focused, &focusSeq)
 	go serve(ctx, cfg, a)
@@ -168,91 +168,90 @@ func main() {
 	log.Print("stopped")
 }
 
-func inputList(m map[string]string) (map[string]string, []string) {
-	if len(m) == 0 {
-		m = map[string]string{"Line": "hw:0,0", "ADAT": "hw:0,1", "Loop": "hw:PHVAudio,1,0", "Routed": "ph_in_sample-edit_in"}
-	}
-	order := []string{"Line", "ADAT", "Loop"}
-	var names []string
-	for _, n := range order {
-		if _, ok := m[n]; ok {
-			names = append(names, n)
-		}
-	}
-	for n := range m {
-		found := false
-		for _, x := range names {
-			found = found || x == n
-		}
-		if !found {
-			names = append(names, n)
-		}
-	}
-	return m, names
-}
-
 // ---- capture source -------------------------------------------------------
 
+// inputName is the one stereo input of this hack. It shows as a column in the
+// Link inputs matrix of the push-audio-loopback web page.
+const inputName = "Sample in"
+
+// sourceCtl reads the bus input into the recorder and the monitor.
 type sourceCtl struct {
 	mu      sync.Mutex
+	bus     *audiobus.Client
 	rec     *record.Recorder
 	mon     *monitor.Monitor
-	rate    int
-	inputs  map[string]string
-	names   []string
 	cancel  context.CancelFunc
-	cur     record.Source
-	curIdx  int
 	monitor bool // the monitor wants the capture to keep running
 }
 
-// on starts capturing input i. A capture that already runs on another input
-// (only the monitor leaves one running) is restarted on the new one.
-func (s *sourceCtl) on(parent context.Context, i int) error {
+// on starts reading the input. It does nothing if it already runs.
+func (s *sourceCtl) on(parent context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.onLocked(parent, i)
+	return s.onLocked(parent)
 }
 
-func (s *sourceCtl) onLocked(parent context.Context, i int) error {
-	if len(s.names) == 0 {
-		return fmt.Errorf("no inputs configured")
-	}
-	i %= len(s.names)
+func (s *sourceCtl) onLocked(parent context.Context) error {
 	if s.cancel != nil {
-		if s.curIdx == i {
-			return nil
-		}
-		s.stopLocked()
+		return nil
 	}
-	dev := s.inputs[s.names[i]]
-	if err := route.Check(dev); err != nil {
-		return err
+	if !s.bus.Connected() {
+		return fmt.Errorf("audio bus not running")
 	}
+	if len(s.bus.Inputs()) == 0 {
+		return fmt.Errorf("no input: set push-audio-loopback to Link")
+	}
+	// The input has the rate of the loopback module (44100 Hz in Link mode).
+	rate := s.bus.Format().Rate
+	s.rec.SetRate(rate)
+	s.mon.SetInRate(rate)
 	ctx, cancel := context.WithCancel(parent)
-	src, err := record.OpenArecordEnv(ctx, dev, s.rate, 2, route.Env(dev))
-	if err != nil {
-		cancel()
-		return err
-	}
-	s.cancel, s.cur, s.curIdx = cancel, src, i
-	go func() {
-		err := record.PumpTap(ctx, src, 2, 480, s.rec, s.mon.Push)
-		if ctx.Err() == nil {
-			log.Printf("capture ended: %v", err)
-		}
-	}()
+	s.cancel = cancel
+	go s.pump(ctx)
 	return nil
+}
+
+// pump moves what waits on the input to the recorder and the monitor. Read
+// never blocks, so it polls; the input ring holds a few periods.
+func (s *sourceCtl) pump(ctx context.Context) {
+	const maxFrames = 2048
+	buf := make([]float32, maxFrames*2)
+	block := [][]float32{make([]float32, maxFrames), make([]float32, maxFrames)}
+	t := time.NewTicker(5 * time.Millisecond)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		for ctx.Err() == nil {
+			n, err := s.bus.Read(0, buf)
+			if err != nil || n == 0 {
+				break
+			}
+			l, r := block[0][:n], block[1][:n]
+			for i := 0; i < n; i++ {
+				l[i], r[i] = buf[2*i], buf[2*i+1]
+			}
+			b := [][]float32{l, r}
+			s.mon.Push(b)
+			// Feed keeps the slices it needs (copy), so b can be reused.
+			if err := s.rec.Feed(b); err != nil {
+				log.Printf("capture ended: %v", err)
+				return
+			}
+			if n < maxFrames {
+				break
+			}
+		}
+	}
 }
 
 func (s *sourceCtl) stopLocked() {
 	if s.cancel != nil {
 		s.cancel()
 		s.cancel = nil
-	}
-	if s.cur != nil {
-		go s.cur.Close()
-		s.cur = nil
 	}
 }
 
@@ -266,14 +265,14 @@ func (s *sourceCtl) off() {
 	s.stopLocked()
 }
 
-// setMonitor turns the live monitor on input i, or off. It keeps the capture
-// running while the monitor is on. It stops the capture when the monitor goes
-// off, unless the recorder is armed or recording (idle tells that).
-func (s *sourceCtl) setMonitor(parent context.Context, on bool, i int, idle bool) error {
+// setMonitor turns the live monitor on or off. It keeps the capture running
+// while the monitor is on. It stops the capture when the monitor goes off,
+// unless the recorder is armed or recording (idle tells that).
+func (s *sourceCtl) setMonitor(parent context.Context, on, idle bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if on {
-		if err := s.onLocked(parent, i); err != nil {
+		if err := s.onLocked(parent); err != nil {
 			return err
 		}
 		s.monitor = true
@@ -363,9 +362,7 @@ func (s *synth) Play(ctx context.Context, ch, note, vel int, hold, rel, pre floa
 
 // ---- audio out (preview) ------------------------------------------------------
 
-func audioLoop(ctx context.Context, eng *playback.Engine, mon *monitor.Monitor, busUp *atomic.Bool) {
-	cl := audiobus.Open(audiobus.SocketPath(audiobus.DefaultDir), "SampleEdit", -1)
-	defer cl.Close()
+func audioLoop(ctx context.Context, cl *audiobus.Client, eng *playback.Engine, mon *monitor.Monitor, busUp *atomic.Bool) {
 	var gen uint64 = ^uint64(0)
 	var buf []float32
 	rate := 0

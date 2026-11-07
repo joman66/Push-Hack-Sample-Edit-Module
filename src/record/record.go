@@ -3,14 +3,9 @@
 package record
 
 import (
-	"context"
-	"encoding/binary"
 	"errors"
-	"fmt"
-	"io"
 	"math"
 	"os"
-	"os/exec"
 	"sync"
 
 	"github.com/federico-pepe/push-hack-sample-edit/src/audio"
@@ -104,6 +99,18 @@ func (r *Recorder) SetConfig(c Config) {
 		c.MaxSec = r.cfg.MaxSec
 	}
 	r.cfg = c
+	r.resetRing()
+}
+
+// SetRate changes the sample rate while idle. The capture source sets it: the
+// audio bus input has the rate of the loopback module, not ours.
+func (r *Recorder) SetRate(rate int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.state != Idle || rate <= 0 || rate == r.cfg.Rate {
+		return
+	}
+	r.cfg.Rate = rate
 	r.resetRing()
 }
 
@@ -298,92 +305,4 @@ func (r *Recorder) Cancel() {
 		r.w = nil
 	}
 	r.state = Idle
-}
-
-// Source delivers interleaved little-endian signed 32-bit frames (24-bit
-// audio left-justified), which is what arecord's S32_LE gives.
-type Source interface {
-	io.ReadCloser
-}
-
-// ArecordSource runs arecord for a capture device such as "hw:1,0".
-type arecord struct {
-	cmd *exec.Cmd
-	out io.ReadCloser
-}
-
-// OpenArecord starts a capture. It needs arecord (alsa-utils) on the Push.
-func OpenArecord(ctx context.Context, device string, rate, channels int) (Source, error) {
-	return OpenArecordEnv(ctx, device, rate, channels, nil)
-}
-
-// OpenArecordEnv is OpenArecord with its own environment. nil keeps ours.
-// A device from the routing matrix needs ALSA_CONFIG_PATH here.
-func OpenArecordEnv(ctx context.Context, device string, rate, channels int, env []string) (Source, error) {
-	path, err := exec.LookPath("arecord")
-	if err != nil {
-		return nil, errors.New("arecord not found on this Push")
-	}
-	cmd := exec.CommandContext(ctx, path, "-q", "-D", device, "-f", "S32_LE",
-		"-r", fmt.Sprint(rate), "-c", fmt.Sprint(channels), "-t", "raw")
-	cmd.Env = env
-	out, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	return &arecord{cmd: cmd, out: out}, nil
-}
-
-func (a *arecord) Read(p []byte) (int, error) { return a.out.Read(p) }
-func (a *arecord) Close() error {
-	if a.cmd.Process != nil {
-		a.cmd.Process.Kill()
-	}
-	a.out.Close()
-	return a.cmd.Wait()
-}
-
-// Pump reads src until it ends or ctx stops and feeds the recorder in
-// blocks of period frames.
-func Pump(ctx context.Context, src Source, channels, period int, r *Recorder) error {
-	return PumpTap(ctx, src, channels, period, r, nil)
-}
-
-// PumpTap is Pump that also hands every block to tap (a live monitor, say).
-// tap must not keep the block: it is reused only by the caller's next read,
-// but a slow tap would hold up the recorder.
-func PumpTap(ctx context.Context, src Source, channels, period int, r *Recorder, tap func([][]float32)) error {
-	frameBytes := 4 * channels
-	buf := make([]byte, period*frameBytes)
-	block := make([][]float32, channels)
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		n, err := io.ReadFull(src, buf)
-		frames := n / frameBytes
-		if frames > 0 {
-			for c := range block {
-				block[c] = make([]float32, frames)
-			}
-			for i := 0; i < frames; i++ {
-				for c := 0; c < channels; c++ {
-					v := int32(binary.LittleEndian.Uint32(buf[(i*channels+c)*4:]))
-					block[c][i] = float32(v) / 2147483648
-				}
-			}
-			if tap != nil {
-				tap(block)
-			}
-			if ferr := r.Feed(block); ferr != nil {
-				return ferr
-			}
-		}
-		if err != nil {
-			return err
-		}
-	}
 }
