@@ -51,7 +51,9 @@ func New() *image.NRGBA { return image.NewNRGBA(image.Rect(0, 0, W, H)) }
 func Draw(img *image.NRGBA, f app.Frame) {
 	gfx.FillRect(img, 0, 0, W, H, theme.Black)
 	drawTop(img, f)
-	if f.Mode == app.ModeRecord {
+	if f.Mgr != nil {
+		drawManager(img, f.Mgr)
+	} else if f.Mode == app.ModeRecord {
 		drawRecord(img, f)
 	} else {
 		drawWave(img, f)
@@ -186,4 +188,53 @@ func drawStatus(img *image.NRGBA, s string) {
 	x := (W - w) / 2
 	gfx.FillRect(img, x, waveY+waveH/2-12, w, 24, theme.StatusBg)
 	text.Draw(img, x+8, waveY+waveH/2+4, s, theme.StatusCol)
+}
+
+// drawManager paints the Sample Manager list in the waveform area.
+func drawManager(img *image.NRGBA, m *app.MgrFrame) {
+	const rowH = 13
+	gfx.FillRect(img, 0, waveY, W, rowH, theme.CrumbBg)
+	text.Draw(img, 6, waveY+10, text.Truncate(m.Dir, 80), theme.CrumbCol)
+	pos := fmt.Sprintf("%d/%d", m.Index, m.Total)
+	text.Draw(img, W-8-text.Width(pos), waveY+10, pos, theme.CrumbCol)
+	if len(m.Rows) == 0 {
+		text.Draw(img, 6, waveY+rowH+14, "Empty folder - no WAV files here", cDim)
+		return
+	}
+	for i, r := range m.Rows {
+		y := waveY + rowH*(i+1)
+		c := theme.White
+		switch {
+		case r.Bad:
+			c = theme.OffColor
+		case r.Dir:
+			c = theme.DirColor
+		}
+		if i == m.Cursor {
+			bg := theme.Select
+			if m.Confirm {
+				bg = theme.Accent
+			}
+			gfx.FillRect(img, 0, y, W-6, rowH, bg)
+		}
+		mark := "  "
+		switch {
+		case r.Playing:
+			mark = "> "
+		case r.Marked:
+			mark = "* "
+		}
+		name := r.Name
+		if r.Dir {
+			name = "[" + name + "]"
+		}
+		text.Draw(img, 6, y+10, text.Truncate(mark+name, 52), c)
+		text.Draw(img, W-14-text.Width(r.Detail), y+10, r.Detail, c)
+	}
+	if m.Scroll && m.Total > 0 {
+		h := waveH - rowH
+		bar := max(h*len(m.Rows)/m.Total, 6)
+		top := waveY + rowH + (h-bar)*(m.Index-1)/max(m.Total-1, 1)
+		gfx.FillRect(img, W-4, top, 3, bar, cDim)
+	}
 }

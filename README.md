@@ -29,7 +29,7 @@ turn for sample-accurate steps.
 
 ### Pages
 - **Record**: Arm, Cancel, AutoGo (start on threshold), Monitor, Mono/Stereo,
-  Auto> (auto-sampler), Load, Clear. Enc 1 threshold, Enc 2 pre-roll.
+  Auto> (auto-sampler), **Load** (opens the Sample Manager), Clear. Enc 1 threshold, Enc 2 pre-roll.
   **Input.** Sample Edit has one stereo input, **Sample in**. You choose its source in the
   **Link inputs** matrix on the web page of push-audio-loopback (Push Hack menu, Web UI): click
   the dot where a Link channel (a Live track, a return, Main, or the output of another hack)
@@ -43,6 +43,24 @@ turn for sample-accurate steps.
   Live's output back into this input while monitoring.
   *Auto-sampler page*: Low, High, Stride, Layers (1 to 8), Hold, Release, MIDI channel.
   It plays each note on the Push's MIDI out, records it, finds a sustain loop, and keeps the zones.
+- **Sample Manager** (Record > **Load**): a window for the WAV files stored on the Push. It lists the
+  folders and samples in Live's User Library sample folder, with length, rate and size.
+
+  | Control | Does |
+  |---|---|
+  | D-pad up / down, Enc 1, jog wheel | Move in the list |
+  | D-pad right, jog press | Open a folder (or load a sample) |
+  | D-pad left, **Up** | Go up a folder (never above the top folder) |
+  | **Load** | Put the sample in the editor and show it on Trim |
+  | **Preview** (also Play or any pad) | Hear it without loading. Press again to stop |
+  | **Copy** (Shift + Duplicate) | Mark the sample |
+  | **Paste** (Select) | Copy the marked file into the open folder, as `name copy.wav` if the name is taken |
+  | **Delete** (Delete button) | Press once to ask, press again to delete. Anything else cancels |
+  | **Refresh**, **Back** | Read the folder again, close the window |
+
+  A loaded sample is exported as `<name>-edit`, so saving never overwrites the original.
+  Only `.wav` files can be deleted, never folders, and nothing outside the top folder can be touched.
+  Presets that point at a deleted WAV will not find it. Set the top folder with `settings.library.browse`.
 - **Trim**: Crop, Silence, AutoTrm, Reverse, Copy, Cut, Paste, Insert. **Shift + lower key 1**
   snaps the selection to zero crossings.
 - **Chop**: Transient, Grid (1/8, 1/16, 1/32 at Live's tempo or the detected one), Equal (4 to 64),

@@ -26,3 +26,19 @@ func TestDrawDoesNotPanicAndPaintsWave(t *testing.T) {
 	f.Frames, f.Peaks = 0, make([][2]float32, 960)
 	Draw(img, f)
 }
+
+func TestDrawManager(t *testing.T) {
+	img := New()
+	f := app.Frame{Mode: app.ModeRecord}
+	f.Mgr = &app.MgrFrame{Dir: "/data/Music/Samples", Index: 2, Total: 9, Cursor: 1, Scroll: true,
+		Rows: []app.MgrRow{{Name: "Drums", Dir: true}, {Name: "kick.wav", Detail: "1.0s 48k S 600KB", Marked: true},
+			{Name: "snare.wav", Detail: "0.5s 48k M 300KB", Playing: true}, {Name: "bad.wav", Detail: "unreadable", Bad: true}}}
+	Draw(img, f)
+	if img.NRGBAAt(300, waveY+13+13+5).A == 0 { // cursor row highlight
+		t.Fatal("cursor row not painted")
+	}
+	f.Mgr.Confirm = true
+	Draw(img, f)
+	f.Mgr = &app.MgrFrame{Dir: "/x"}
+	Draw(img, f) // empty folder
+}

@@ -18,6 +18,10 @@ func (a *App) CC(cc, val byte) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if push3.IsEncoderCC(cc) {
+		if a.mgr != nil {
+			a.mgrEncoder(cc, push3.DecodeRel(val))
+			return
+		}
 		a.encoder(cc, push3.DecodeRel(val))
 		return
 	}
@@ -31,11 +35,23 @@ func (a *App) CC(cc, val byte) {
 	}
 	switch {
 	case cc >= push3.CCScreenTop1 && cc <= push3.CCScreenTop8:
-		a.topKey(int(cc - push3.CCScreenTop1))
+		if a.mgr != nil {
+			a.mgrTop(int(cc - push3.CCScreenTop1))
+		} else {
+			a.topKey(int(cc - push3.CCScreenTop1))
+		}
 	case cc >= push3.CCScreenBot1 && cc <= push3.CCScreenBot8:
-		a.botKey(int(cc - push3.CCScreenBot1))
+		if a.mgr != nil {
+			a.mgrBot(int(cc - push3.CCScreenBot1))
+		} else {
+			a.botKey(int(cc - push3.CCScreenBot1))
+		}
 	default:
-		a.button(cc)
+		if a.mgr != nil {
+			a.mgrButton(cc)
+		} else {
+			a.button(cc)
+		}
 	}
 }
 
@@ -393,26 +409,13 @@ func (a *App) botRecord(i int) {
 	case 5:
 		a.Page = 1
 	case 6:
-		a.loadLast()
+		a.openManager()
 	case 7:
 		if a.Rec.State() == record.Idle {
 			a.load(audio.New(48000, 2, 0))
 			a.say("Cleared")
 		}
 	}
-}
-
-func (a *App) loadLast() {
-	if a.H.Save == nil {
-		return
-	}
-	b, err := a.H.Save.Load(a.S.Name)
-	if err != nil {
-		a.say("Load: %s", asciiErr(err))
-		return
-	}
-	a.load(b)
-	a.say("Loaded %s", a.S.Name)
 }
 
 func (a *App) botTrim(i int) {
@@ -843,6 +846,10 @@ func (a *App) Pad(note, vel byte) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if !push3.IsPadNote(note) || vel == 0 {
+		return
+	}
+	if a.mgr != nil {
+		a.mgrPreview() // any pad previews the selected sample
 		return
 	}
 	i := padIndex(note)

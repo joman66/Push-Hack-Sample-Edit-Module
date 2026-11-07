@@ -39,6 +39,26 @@ type Frame struct {
 	RecLevel  float64
 	Shift     bool
 	Info      string
+	Mgr       *MgrFrame // set while the Sample Manager is open
+}
+
+// MgrRow is one visible line of the Sample Manager list.
+type MgrRow struct {
+	Name, Detail string
+	Dir, Marked  bool // Marked: this is the copied file
+	Bad          bool
+	Playing      bool
+}
+
+// MgrFrame is the Sample Manager window.
+type MgrFrame struct {
+	Dir     string
+	Rows    []MgrRow
+	Cursor  int // index into Rows
+	Index   int // 1-based position in the whole list
+	Total   int
+	Confirm bool
+	Scroll  bool // more rows above or below
 }
 
 func fmtT(frames, rate int) string {
@@ -72,6 +92,9 @@ func (a *App) Snapshot(cols int) Frame {
 	f.Top[6] = Key{Label: "Loop", On: a.S.Loop}
 	f.Top[7] = Key{Label: "LIVE"}
 	a.labels(&f)
+	if a.mgr != nil {
+		f.Mgr = a.mgrFrame()
+	}
 	if a.asProg != "" {
 		f.Status = a.asProg
 	}
@@ -121,6 +144,10 @@ func (a *App) labels(f *Frame) {
 	p := &f.Params
 	set := func(i int, n, v string) { p[i] = Param{n, v} }
 	b := &f.Bot
+	if a.mgr != nil {
+		a.mgrLabels(f)
+		return
+	}
 	switch a.Mode {
 	case ModeRecord:
 		st := a.Rec.State()
