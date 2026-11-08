@@ -281,7 +281,7 @@ func (a *App) LEDs() LEDs {
 	// Undo and Select and Delete and Duplicate: lit when they can act
 	l.Btn[push3.CCUndo] = lit(a.Doc.CanUndo() || a.Doc.CanRedo())
 	l.Btn[push3.CCSelect] = lit(len(a.Doc.Clipboard) > 0)
-	l.Btn[push3.CCDuplicate] = lit(a.Sel.Len() > 0)
+	l.Btn[push3.CCDuplicate] = lit(a.Sel.Len() > 0 || (a.Mode == ModeChop && a.Cur < len(a.Slice)))
 	l.Btn[push3.CCDelete] = lit(a.Sel.Len() > 0 || a.Mode == ModeChop)
 	l.Btn[push3.CCRecord] = map[record.State]uint8{record.Idle: col("dk_red"), record.Armed: col("amber"), record.Recording: col("red")}[a.Rec.State()]
 	l.Btn[push3.CCPlay] = lit(a.Eng.Playing())

@@ -545,3 +545,86 @@ func TestMonitorErrorStaysOff(t *testing.T) {
 	a.H.Monitor = nil
 	bot(a, 2) // no hook: say so, no crash
 }
+
+// softClicks is a noise bed with loud and quiet hits: only a sensitive
+// detector finds the quiet ones.
+func softClicks() *audio.Buffer {
+	b := audio.New(48000, 1, 48000)
+	seed := uint32(9)
+	for i := range b.Ch[0] {
+		seed = seed*1664525 + 1013904223
+		b.Ch[0][i] = float32(int32(seed)>>8) / float32(1<<23) * 0.05
+	}
+	for k, p := range []int{4000, 12000, 20000, 28000, 36000} {
+		amp := float32(0.9)
+		if k%2 == 1 {
+			amp = 0.2
+		}
+		for i := 0; i < 2400; i++ {
+			seed = seed*1664525 + 1013904223
+			b.Ch[0][p+i] += float32(int32(seed)>>8) / float32(1<<23) * amp * float32(math.Exp(-float64(i)/500))
+		}
+	}
+	return b
+}
+
+func TestSensFollowsKnobInTransientMode(t *testing.T) {
+	a, _ := newApp(t)
+	a.Load(softClicks())
+	top(a, 2)
+	a.S.Sens = 1
+	bot(a, 0)
+	hi := len(a.Slice)
+	turn(a, push3.CCEncoder5, -30) // least sensitive: only the loud hits, live
+	if a.S.How != SliceTransient || len(a.Slice) >= hi || len(a.Slice) < 2 {
+		t.Fatalf("slices %d -> %d", hi, len(a.Slice))
+	}
+	if a.Cur >= len(a.Slice) {
+		t.Fatal("selection out of range")
+	}
+	// Equal slices do not depend on Sens and keep their hand edits
+	bot(a, 2)
+	a.Slice[1].Choke = 3
+	turn(a, push3.CCEncoder5, 3)
+	if len(a.Slice) != 8 || a.Slice[1].Choke != 3 {
+		t.Fatal("Sens must not redo equal slices")
+	}
+}
+
+func TestAddPointAtSelectedAndMoveIt(t *testing.T) {
+	a, _ := newApp(t)
+	a.Load(clickAudio())
+	top(a, 2)
+	bot(a, 2) // 8 equal slices
+	a.Cur = 2
+	was := a.Slice[2]
+	a.Slice[2].Choke = 4
+	press(a, push3.CCDuplicate)
+	if len(a.Slice) != 9 || a.Cur != 3 {
+		t.Fatalf("slices %d cur %d", len(a.Slice), a.Cur)
+	}
+	l, r := a.Slice[2], a.Slice[3]
+	if l.Start != was.Start || l.End != r.Start || r.End != was.End || l.Choke != 4 || r.Choke != 0 {
+		t.Fatalf("split wrong: %+v %+v (was %+v)", l, r, was)
+	}
+	if l.End <= l.Start {
+		t.Fatal("new point must be after the selected one")
+	}
+	// SlcSta moves the new point, and the slice before follows it
+	turn(a, push3.CCEncoder7, 4)
+	l2, r2 := a.Slice[2], a.Slice[3]
+	if r2.Start <= r.Start || l2.End != r2.Start || r2.End != was.End {
+		t.Fatalf("point did not move as one: %+v %+v", l2, r2)
+	}
+	// the point cannot be pushed past the slice before it
+	turn(a, push3.CCEncoder7, -400)
+	if a.Slice[3].Start < a.Slice[2].Start+16 || a.Slice[2].End != a.Slice[3].Start {
+		t.Fatalf("overlap: %+v %+v", a.Slice[2], a.Slice[3])
+	}
+	// nothing to split before slicing
+	a.Slice = nil
+	press(a, push3.CCDuplicate)
+	if len(a.Slice) != 0 {
+		t.Fatal("no slices")
+	}
+}

@@ -13,6 +13,9 @@
 - The Line, ADAT, Loop and Routed inputs, the `arecord` capture, the `inputs` setting, and the `audio` block in `hack.json` (the old Push Manager audio routing matrix).
 
 ### Added
+- Chop: **Duplicate** adds a slice point at the selected slice, so you can move it by hand with SlcSta.
+- Chop: the **Sens** knob re-slices live in Transient mode.
+- Chop: moving a shared slice point (SlcSta, SlcEnd) moves the slice next to it too.
 - Live monitor of the input (Monitor key, Enc 3).
 - Sample Manager window (Record > Load): browse the sample folders on the device, load, preview,
   copy, paste and delete (with confirm) WAV files. Replaces Load reloading only the last export.
