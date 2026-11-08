@@ -65,7 +65,14 @@ turn for sample-accurate steps.
   snaps the selection to zero crossings.
 - **Chop**: Transient, Grid (1/8, 1/16, 1/32 at Live's tempo or the detected one), Equal (4 to 64),
   Manual (tap pads while it plays), Clear, 16 Vel, Nudge (zero crossing), Assign (choke group).
-  Pads light for each slice. Tap a pad to hear and select it. Enc 7 / Enc 8 move the slice ends.
+  Pads light for each slice. Tap a pad to hear and select it. Enc 7 / Enc 8 (SlcSta, SlcEnd) move the slice ends.
+  When two slices share a point, moving it moves both, so there is no gap or overlap.
+  **Sens** (Enc 5): in Transient mode the slices follow the knob as you turn it (about 3 ms for 30 s of audio).
+  It does not touch Grid, Equal or Manual slices, so hand edits are safe there. Pressing Transnt again also
+  throws away edits made to transient slices.
+  **Duplicate** adds a slice point at the selected slice. The new point starts 10 ms after the selected
+  one and becomes the selected slice. Turn Enc 7 (SlcSta) to move it. **Delete** removes a point (the slice
+  joins the one before it).
 - **Process**: Normal (peak or RMS), Gain (-inf to +24 dB), FadeIn, FadeOut (Lin, Exp, Log), Reverse.
   Page 2: Pitch (+/- 24 st), Stretch (x0.25 to x4), live or destructive pitch, Rhythm or Tonal.
 - **Export**: Simpler, Drum Rk, WAV, Sampler, All. Enc 5 root key, Enc 6 loop crossfade,

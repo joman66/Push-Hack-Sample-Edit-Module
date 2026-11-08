@@ -96,6 +96,8 @@ func (a *App) button(cc byte) {
 	case push3.CCDuplicate:
 		if a.shift {
 			a.copySel()
+		} else if a.Mode == ModeChop {
+			a.addPointAtCur()
 		}
 	case push3.CCDelete:
 		if a.shift {
@@ -278,6 +280,7 @@ func (a *App) modeEncoder(n, d int, fine bool) {
 		switch n {
 		case 4:
 			s.Sens = clampf(s.Sens+scale(d, fine, 0.05, 0.01), 0, 1)
+			a.resliceLive()
 		case 5:
 			if s.How == SliceEqual {
 				s.EqualN = max(0, min(len(EqualNs)-1, s.EqualN+d))
@@ -290,7 +293,7 @@ func (a *App) modeEncoder(n, d int, fine bool) {
 				if fine {
 					step = 1
 				}
-				slicer.SetStart(a.Slice, a.Cur, a.Slice[a.Cur].Start+d*step)
+				a.movePoint(a.Cur, a.Slice[a.Cur].Start+d*step)
 				a.touch()
 			}
 		case 7:
@@ -299,7 +302,7 @@ func (a *App) modeEncoder(n, d int, fine bool) {
 				if fine {
 					step = 1
 				}
-				slicer.SetEnd(a.Slice, a.Cur, a.Slice[a.Cur].End+d*step, a.frames())
+				a.moveEnd(a.Cur, a.Slice[a.Cur].End+d*step)
 				a.touch()
 			}
 		}
@@ -616,6 +619,75 @@ func (a *App) botChop(i int) {
 			a.say("Choke %d", a.Slice[a.Cur].Choke)
 		}
 	}
+}
+
+// resliceLive finds the transients again when Sens turns, so the slices
+// follow the knob. Only in Transient mode: Grid, Equal and Manual slices
+// do not depend on Sens, and an edit made by hand must not be thrown away.
+func (a *App) resliceLive() {
+	if a.S.How != SliceTransient || a.frames() == 0 {
+		return
+	}
+	cur := a.Cur
+	m := slicer.Transients(a.Doc.Buf.Mono(), a.rate(), a.S.Sens, a.rate()/20)
+	a.Slice = slicer.FromMarkers(m, a.frames())
+	a.Cur = max(0, min(cur, len(a.Slice)-1))
+	a.touch()
+	a.say("%d slices (%.0f%%)", len(a.Slice), a.S.Sens*100)
+}
+
+// addPointAtCur adds a slice point at the selected one. Two points cannot sit
+// on the same frame, so the new one starts a little after it and becomes the
+// selected slice: turn SlcSta to move it where you want it.
+func (a *App) addPointAtCur() {
+	if a.Cur >= len(a.Slice) {
+		a.say("Slice first (Chop)")
+		return
+	}
+	if len(a.Slice) >= slicer.MaxSlices {
+		a.say("All %d pads are used", slicer.MaxSlices)
+		return
+	}
+	sl := a.Slice[a.Cur]
+	off := max(slicer.MinLen, min(a.rate()/100, (sl.End-sl.Start)/2))
+	if sl.End-sl.Start < 2*slicer.MinLen {
+		a.say("Slice too short to split")
+		return
+	}
+	left, right := sl, sl
+	left.End = sl.Start + off
+	right.Start = left.End
+	right.Choke = 0 // a new point starts without a choke group
+	a.Slice = append(a.Slice[:a.Cur], append([]slicer.Slice{left, right}, a.Slice[a.Cur+1:]...)...)
+	a.Cur++
+	a.touch()
+	a.say("Point added: turn SlcSta")
+}
+
+// movePoint moves the start of slice i. When the slice before ends exactly
+// where this one starts (they share a point), that end moves too, so the
+// point moves as one.
+func (a *App) movePoint(i, pos int) {
+	old := a.Slice[i].Start
+	if i > 0 && a.Slice[i-1].End == old {
+		pos = max(pos, a.Slice[i-1].Start+slicer.MinLen)
+		slicer.SetStart(a.Slice, i, pos)
+		a.Slice[i-1].End = a.Slice[i].Start
+		return
+	}
+	slicer.SetStart(a.Slice, i, pos)
+}
+
+// moveEnd is movePoint for the end of slice i and the start of the next.
+func (a *App) moveEnd(i, pos int) {
+	old := a.Slice[i].End
+	if i+1 < len(a.Slice) && a.Slice[i+1].Start == old {
+		pos = min(pos, a.Slice[i+1].End-slicer.MinLen)
+		slicer.SetEnd(a.Slice, i, pos, a.frames())
+		a.Slice[i+1].Start = a.Slice[i].End
+		return
+	}
+	slicer.SetEnd(a.Slice, i, pos, a.frames())
 }
 
 func (a *App) setSlices(m []int, how SliceHow) {
