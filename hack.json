@@ -1,10 +1,10 @@
 {
   "id": "sample-edit",
   "name": "Sample Edit",
-  "version": "0.1.0",
+  "version": "1.0.0",
+  "author": "joman66",
   "description": "Offline sampler and editor: record, trim, chop, process and export to Simpler, Sampler or Drum Rack. Needs push-manager and push-display installed and running. Preview audio and the stereo input need push-audio-loopback in Link mode: connect a Link channel to the input \"Sample in\" in the Link inputs matrix on its web page.",
   "binary": "sample-edit",
-  "port": 7711,
   "surface": {
     "label": "SAMPLE",
     "color": "violet"
